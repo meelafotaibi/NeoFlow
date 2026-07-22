@@ -5,22 +5,17 @@ import { useNeoFlow } from "@/lib/store";
 import { GlassCard } from "@/components/glass-card";
 import { formatCurrency } from "@/lib/countdown";
 import { CurrencySymbol } from "@/components/currency-symbol";
-import { ProgressRing } from "@/components/progress-ring";
 import {
   History,
   CheckCircle2,
   Target,
   Trophy,
   Award,
-  Sparkles,
   Timer,
   Wallet,
   Search,
   ChevronDown,
   ChevronUp,
-  TrendingUp,
-  Flame,
-  ShieldCheck,
   ArrowDownLeft,
   ArrowUpRight,
   ShoppingBag,
@@ -34,22 +29,27 @@ import { Input } from "@/components/ui/input";
 type ArchiveTab = "all" | "tasks" | "plans" | "goals" | "ledger";
 
 export function HistoryPage() {
-  const { tasks, plans, financialGoals, transactions, savedAmount } = useNeoFlow();
+  const { tasks = [], plans = [], financialGoals = [], transactions = [] } = useNeoFlow();
   const [activeTab, setActiveTab] = useState<ArchiveTab>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [isLedgerExpanded, setIsLedgerExpanded] = useState(false);
 
+  const safeTransactions = useMemo(() => transactions || [], [transactions]);
+  const safeTasks = useMemo(() => tasks || [], [tasks]);
+  const safePlans = useMemo(() => plans || [], [plans]);
+  const safeFinancialGoals = useMemo(() => financialGoals || [], [financialGoals]);
+
   // Completed items filters
-  const completedTasks = useMemo(() => tasks.filter((t) => t.status === "done"), [tasks]);
-  const completedPlans = useMemo(() => plans.filter((p) => p.progress >= 100), [plans]);
-  const purchasedGoals = useMemo(() => financialGoals.filter((g) => g.isPurchased), [financialGoals]);
+  const completedTasks = useMemo(() => safeTasks.filter((t) => t.status === "done"), [safeTasks]);
+  const completedPlans = useMemo(() => safePlans.filter((p) => p.progress >= 100), [safePlans]);
+  const purchasedGoals = useMemo(() => safeFinancialGoals.filter((g) => g.isPurchased), [safeFinancialGoals]);
 
   // Statistics
   const totalTasksDone = completedTasks.length;
   const totalPlansMastered = completedPlans.length;
   const totalGoalsAchieved = purchasedGoals.length;
   const totalGoalValueAchieved = purchasedGoals.reduce((sum, g) => sum + g.price, 0);
-  const totalDepositAmount = transactions
+  const totalDepositAmount = safeTransactions
     .filter((t) => t.type === "deposit")
     .reduce((sum, t) => sum + t.amount, 0);
 
@@ -73,10 +73,10 @@ export function HistoryPage() {
   }, [purchasedGoals, searchQuery]);
 
   const filteredTransactions = useMemo(() => {
-    if (!searchQuery) return transactions;
+    if (!searchQuery) return safeTransactions;
     const q = searchQuery.toLowerCase();
-    return transactions.filter((t) => t.description.toLowerCase().includes(q) || t.type.toLowerCase().includes(q));
-  }, [transactions, searchQuery]);
+    return safeTransactions.filter((t) => t.description.toLowerCase().includes(q) || t.type.toLowerCase().includes(q));
+  }, [safeTransactions, searchQuery]);
 
   const typeBadges = {
     deposit: { label: "Deposit", icon: ArrowDownLeft, color: "text-green-400 bg-green-500/10 border-green-500/30" },
@@ -185,7 +185,7 @@ export function HistoryPage() {
             { id: "tasks", label: `Tasks (${completedTasks.length})`, icon: CheckCircle2 },
             { id: "plans", label: `Plans (${completedPlans.length})`, icon: Timer },
             { id: "goals", label: `Goals (${purchasedGoals.length})`, icon: Target },
-            { id: "ledger", label: `Ledger (${transactions.length})`, icon: Wallet },
+            { id: "ledger", label: `Ledger (${safeTransactions.length})`, icon: Wallet },
           ].map((tab) => {
             const TabIcon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -322,7 +322,7 @@ export function HistoryPage() {
                     <div className="min-w-0">
                       <h4 className="font-bold text-xs text-foreground line-through opacity-80 truncate">{task.title}</h4>
                       <p className="text-[10px] text-muted-foreground font-mono">
-                        Priority: {task.priority.toUpperCase()} | Subtasks: {task.subtasks.length} done
+                        Priority: {task.priority.toUpperCase()} | Subtasks: {task.subtasks?.length || 0} done
                       </p>
                     </div>
                   </div>
