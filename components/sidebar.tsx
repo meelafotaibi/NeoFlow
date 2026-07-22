@@ -7,13 +7,14 @@ import {
   CheckSquare,
   Wallet,
   BarChart3,
+  History,
   Menu,
   X,
 } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 
-export type NavItem = "dashboard" | "plans" | "tasks" | "finance" | "analytics";
+export type NavItem = "dashboard" | "plans" | "tasks" | "finance" | "analytics" | "history";
 
 interface SidebarProps {
   activeItem: NavItem;
@@ -26,6 +27,7 @@ const navItems: { id: NavItem; label: string; icon: typeof LayoutDashboard }[] =
   { id: "tasks", label: "Tasks", icon: CheckSquare },
   { id: "finance", label: "Finance", icon: Wallet },
   { id: "analytics", label: "Analytics", icon: BarChart3 },
+  { id: "history", label: "History", icon: History },
 ];
 
 export function Sidebar({ activeItem, onNavigate }: SidebarProps) {

@@ -9,13 +9,14 @@ import { PlansPage } from "@/components/plans-page";
 import { TasksPage } from "@/components/tasks-page";
 import { FinancePage } from "@/components/finance-page";
 import { AnalyticsPage } from "@/components/analytics-page";
+import { HistoryPage } from "@/components/history-page";
 import { QuickCommandPalette } from "@/components/quick-command-palette";
 
 function NeoFlowApp() {
   const [activeNav, setActiveNav] = useState<NavItem>("dashboard");
 
   const handleNavigate = (item: NavItem | string) => {
-    if (["dashboard", "plans", "tasks", "finance", "analytics"].includes(item)) {
+    if (["dashboard", "plans", "tasks", "finance", "analytics", "history"].includes(item)) {
       setActiveNav(item as NavItem);
     }
   };
@@ -40,6 +41,7 @@ function NeoFlowApp() {
             {activeNav === "tasks" && <TasksPage />}
             {activeNav === "finance" && <FinancePage />}
             {activeNav === "analytics" && <AnalyticsPage />}
+            {activeNav === "history" && <HistoryPage />}
           </div>
         </div>
       </main>

@@ -1,14 +1,17 @@
 "use client";
 
+import { useState } from "react";
 import { GlassCard } from "@/components/glass-card";
 import { useNeoFlow } from "@/lib/store";
 import { formatCurrency } from "@/lib/countdown";
 import { CurrencySymbol } from "@/components/currency-symbol";
-import { History, ArrowUpRight, ArrowDownLeft, ShoppingBag, RotateCcw } from "lucide-react";
+import { History, ArrowUpRight, ArrowDownLeft, ShoppingBag, RotateCcw, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 
 export function TransactionLedger() {
   const { transactions = [] } = useNeoFlow();
+  const [isExpanded, setIsExpanded] = useState(false);
 
   if (transactions.length === 0) {
     return (
@@ -26,6 +29,8 @@ export function TransactionLedger() {
     refund: { label: "Refund", icon: RotateCcw, color: "text-secondary bg-secondary/10 border-secondary/30" },
   };
 
+  const visibleTransactions = isExpanded ? transactions : transactions.slice(0, 5);
+
   return (
     <GlassCard className="space-y-3 border border-border/40">
       <div className="flex items-center justify-between">
@@ -33,13 +38,40 @@ export function TransactionLedger() {
           <History className="h-4 w-4 text-primary" />
           Financial Transaction Ledger & History
         </h3>
-        <span className="text-[11px] font-mono text-muted-foreground">
-          {transactions.length} record{transactions.length > 1 ? "s" : ""}
-        </span>
+        
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] font-mono text-muted-foreground">
+            {transactions.length} record{transactions.length > 1 ? "s" : ""}
+          </span>
+
+          {transactions.length > 5 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsExpanded(!isExpanded)}
+              className="h-7 text-xs font-bold text-accent hover:bg-accent/20"
+            >
+              {isExpanded ? (
+                <>
+                  <ChevronUp className="h-3.5 w-3.5 mr-1" /> Collapse
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="h-3.5 w-3.5 mr-1" /> Expand ({transactions.length})
+                </>
+              )}
+            </Button>
+          )}
+        </div>
       </div>
 
-      <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
-        {transactions.map((tx) => {
+      <div
+        className={cn(
+          "space-y-1.5 transition-all duration-300",
+          isExpanded ? "max-h-96 overflow-y-auto pr-1" : "max-h-56 overflow-y-auto pr-1"
+        )}
+      >
+        {visibleTransactions.map((tx) => {
           const info = typeBadges[tx.type] || typeBadges.deposit;
           const Icon = info.icon;
           const isPositive = tx.type === "deposit" || tx.type === "refund";
@@ -75,6 +107,17 @@ export function TransactionLedger() {
           );
         })}
       </div>
+
+      {!isExpanded && transactions.length > 5 && (
+        <div className="pt-1 text-center">
+          <button
+            onClick={() => setIsExpanded(true)}
+            className="text-[11px] text-accent font-semibold hover:underline inline-flex items-center gap-1"
+          >
+            Show {transactions.length - 5} more transactions <ChevronDown className="h-3 w-3" />
+          </button>
+        </div>
+      )}
     </GlassCard>
   );
 }
