@@ -49,10 +49,6 @@ export const googleProvider = new GoogleAuthProvider();
 export const appleProvider = new OAuthProvider("apple.com");
 appleProvider.addScope("email");
 appleProvider.addScope("name");
-appleProvider.setCustomParameters({
-  locale: "en",
-  redirect_uri: "https://neoflow-4df47.firebaseapp.com/__/auth/handler",
-});
 
 export const db = dbInstance;
 
@@ -63,11 +59,25 @@ export async function signInWithGoogle() {
   return result.user;
 }
 
-// Apple Sign-In
+// Apple Sign-In with clear diagnostic handling
 export async function signInWithApple() {
   if (!auth) throw new Error("Firebase Auth is not initialized. Please configure API keys.");
-  const result = await signInWithPopup(auth, appleProvider);
-  return result.user;
+  try {
+    const result = await signInWithPopup(auth, appleProvider);
+    return result.user;
+  } catch (err: any) {
+    console.error("Apple Sign-In error:", err);
+    if (
+      err?.code === "auth/operation-not-allowed" ||
+      err?.code === "auth/configuration-not-found" ||
+      err?.message?.includes("operation-not-allowed")
+    ) {
+      throw new Error(
+        "Apple Sign-In requires configuration in your Firebase Console. Go to Firebase Console -> Authentication -> Sign-in method -> Enable Apple with your Apple Developer Team ID."
+      );
+    }
+    throw err;
+  }
 }
 
 // Sign Out
@@ -100,18 +110,21 @@ export async function loadUserData(uid: string): Promise<object | null> {
   return null;
 }
 
-// Subscribe to real-time Cloud Firestore updates for real-time Phone & PC synchronization
+// Subscribe to real-time Cloud Firestore updates (filters out local echo writes)
 export function subscribeToUserData(uid: string, callback: (data: object | null) => void) {
   if (!db) return () => {};
   try {
     const userDocRef = doc(db, "users", uid);
     return onSnapshot(
       userDocRef,
+      { includeMetadataChanges: true },
       (docSnap) => {
+        // Prevent local echo writes from overwriting React state during active updates
+        if (docSnap.metadata.hasPendingWrites) {
+          return;
+        }
         if (docSnap.exists()) {
           callback(docSnap.data()?.data || null);
-        } else {
-          callback(null);
         }
       },
       (error) => {
