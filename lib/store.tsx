@@ -112,6 +112,8 @@ export function NeoFlowProvider({ children }: { children: ReactNode }) {
 
   // 2. Auth Listener: Load cloud Firestore data on login, isolate user session
   useEffect(() => {
+    if (!auth) return;
+
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         activeUserRef.current = user.uid;
