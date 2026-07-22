@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, useCallback, useRef, type ReactNode } from "react";
 import type { Plan, Task, FinancialGoal, NeoFlowStore, TransactionRecord } from "./types";
-import { auth, saveUserData, loadUserData, subscribeToUserData } from "./firebase";
+import { auth, saveUserData, subscribeToUserData } from "./firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import { encryptVaultData, decryptVaultData } from "./crypto-vault";
 
@@ -47,19 +47,16 @@ function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
+/** Parse a raw object into a clean NeoFlowStore — handles plain JSON from Firestore */
 function parseStore(raw: unknown): NeoFlowStore | null {
   if (!raw || typeof raw !== "object") return null;
-  let parsed = raw as Record<string, unknown>;
+  const parsed = raw as Record<string, unknown>;
 
-  // Unwrap doc.data() container if nested from Firestore saveUserData
-  if (parsed.data && typeof parsed.data === "object") {
-    parsed = parsed.data as Record<string, unknown>;
-  }
-
-  // Decrypt encrypted vault payload if stored in Firestore or LocalStorage
+  // Handle encrypted local storage payload (only used in localStorage, NOT in Firestore)
   if (typeof parsed.encryptedPayload === "string") {
     const decrypted = decryptVaultData(parsed.encryptedPayload);
     if (decrypted) return parseStore(decrypted);
+    return null;
   }
 
   const plans = Array.isArray(parsed.plans) ? parsed.plans : [];
@@ -71,71 +68,56 @@ function parseStore(raw: unknown): NeoFlowStore | null {
   return { plans, tasks, financialGoals, savedAmount, transactions };
 }
 
-// Safely load encrypted local storage for a specific key
-function loadLocalStorageKey(key: string): NeoFlowStore | null {
+/** Load + decrypt from localStorage by key */
+function loadFromLocalStorage(key: string): NeoFlowStore | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = localStorage.getItem(key);
-    if (raw) {
-      const decrypted = decryptVaultData(raw);
-      return parseStore(decrypted);
-    }
-  } catch {}
-  return null;
+    if (!raw) return null;
+    // Try decrypting first
+    const decrypted = decryptVaultData(raw);
+    if (decrypted) return parseStore(decrypted);
+    // Fallback: try plain JSON
+    return parseStore(JSON.parse(raw));
+  } catch {
+    return null;
+  }
 }
 
-// Fallback search across local keys if specific key is empty
-function getBestLocalStorageData(uid?: string | null): NeoFlowStore {
-  if (typeof window === "undefined") return emptyStore;
-
-  const keysToTry: string[] = [];
-  if (uid) {
-    keysToTry.push(`${STORAGE_KEY}-${uid}`);
+/** Save encrypted store to localStorage */
+function saveToLocalStorage(key: string, data: NeoFlowStore) {
+  if (typeof window === "undefined") return;
+  try {
+    const encrypted = encryptVaultData(data);
+    localStorage.setItem(key, encrypted);
+  } catch (e) {
+    console.warn("localStorage save error:", e);
   }
-  keysToTry.push(STORAGE_KEY);
-  keysToTry.push(`${STORAGE_KEY}-guest-user`);
-  keysToTry.push(`${STORAGE_KEY}-backup`);
-
-  for (const key of keysToTry) {
-    const data = loadLocalStorageKey(key);
-    if (data && (data.plans.length > 0 || data.tasks.length > 0 || data.financialGoals.length > 0 || data.savedAmount > 0)) {
-      return data;
-    }
-  }
-
-  // If any valid store exists return it
-  const defaultData = loadLocalStorageKey(STORAGE_KEY);
-  if (defaultData) return defaultData;
-
-  return emptyStore;
 }
 
 export function NeoFlowProvider({ children }: { children: ReactNode }) {
   const [store, setStore] = useState<NeoFlowStore>(emptyStore);
-  const [isHydrated, setIsHydrated] = useState(false);
-  const [isAuthInitialized, setIsAuthInitialized] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  
-  // Track active user ID ref to avoid race conditions during auth transitions
-  const activeUserRef = useRef<string | null>(null);
 
-  // 1. Initial hydration from local storage on mount
+  // Refs to avoid stale closures and prevent save-then-load loops
+  const activeUserRef = useRef<string | null>(null);
+  const isLoadingFromCloudRef = useRef(false); // true while we're applying a cloud snapshot
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
+
   useEffect(() => {
-    const initialData = getBestLocalStorageData(null);
-    setStore(initialData);
-    setIsHydrated(true);
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
   }, []);
 
-  // 2. Auth & Real-Time Sync Listener: Subscribes to Firestore for instant Phone & PC sync with strict UID isolation
+  // Auth listener + Firestore real-time sync
   useEffect(() => {
-    if (!auth) {
-      setIsAuthInitialized(true);
-      return;
-    }
+    if (!auth) return;
 
     let snapshotUnsub: (() => void) | null = null;
 
     const authUnsub = onAuthStateChanged(auth, (user) => {
+      // Clean up previous snapshot listener when auth changes
       if (snapshotUnsub) {
         snapshotUnsub();
         snapshotUnsub = null;
@@ -145,33 +127,35 @@ export function NeoFlowProvider({ children }: { children: ReactNode }) {
         activeUserRef.current = user.uid;
         setCurrentUserId(user.uid);
 
-        // Load ONLY this specific user's local cache for instant UI rendering
-        const userSpecificKey = `${STORAGE_KEY}-${user.uid}`;
-        const localUserCache = loadLocalStorageKey(userSpecificKey);
-        
-        if (localUserCache && (localUserCache.plans.length > 0 || localUserCache.tasks.length > 0 || localUserCache.financialGoals.length > 0 || localUserCache.savedAmount > 0)) {
-          setStore(localUserCache);
+        const userKey = `${STORAGE_KEY}-${user.uid}`;
+
+        // 1. Immediately show local cache for instant UI (no loading flicker)
+        const localCache = loadFromLocalStorage(userKey);
+        if (localCache) {
+          setStore(localCache);
         }
 
-        // Subscribe to real-time Firestore cloud changes for THIS user
+        // 2. Subscribe to cloud — fires only on server-confirmed writes
         snapshotUnsub = subscribeToUserData(user.uid, (cloudData) => {
-          const parsedCloud = parseStore(cloudData);
-          if (parsedCloud) {
-            setStore(parsedCloud);
-            if (typeof window !== "undefined") {
-              const encrypted = encryptVaultData(parsedCloud);
-              localStorage.setItem(userSpecificKey, encrypted);
-            }
-          }
-          setIsAuthInitialized(true);
+          if (!mountedRef.current) return;
+          if (!cloudData) return; // New user — keep local state
+
+          const parsed = parseStore(cloudData);
+          if (!parsed) return;
+
+          // Apply cloud data and update local cache
+          isLoadingFromCloudRef.current = true;
+          setStore(parsed);
+          saveToLocalStorage(userKey, parsed);
+          // Reset flag after React has processed the state update
+          setTimeout(() => { isLoadingFromCloudRef.current = false; }, 100);
         });
       } else {
-        // User logged out: switch to guest session isolated under guest key
-        activeUserRef.current = "guest-user";
-        setCurrentUserId("guest-user");
-        const guestData = loadLocalStorageKey(`${STORAGE_KEY}-guest-user`) || emptyStore;
+        // Guest / logged out
+        activeUserRef.current = "guest";
+        setCurrentUserId(null);
+        const guestData = loadFromLocalStorage(`${STORAGE_KEY}-guest`) || emptyStore;
         setStore(guestData);
-        setIsAuthInitialized(true);
       }
     });
 
@@ -181,25 +165,37 @@ export function NeoFlowProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // 3. Auto-save to LocalStorage and Firestore whenever store updates (strictly user-isolated & blocked until Auth is ready)
+  // Debounced auto-save: saves to localStorage immediately, Firestore after 800ms idle
+  // Skips saving when we're in the middle of loading a cloud snapshot (prevents echo loop)
   useEffect(() => {
-    if (!isHydrated || !isAuthInitialized) return;
+    if (isLoadingFromCloudRef.current) return;
+    if (!activeUserRef.current) return;
 
-    const targetId = activeUserRef.current || currentUserId || "guest-user";
-    const encryptedString = encryptVaultData(store);
+    const userId = activeUserRef.current;
+    const storageKey = `${STORAGE_KEY}-${userId}`;
 
-    // Save encrypted vault payload ONLY to user-specific local key
-    if (typeof window !== "undefined") {
-      localStorage.setItem(`${STORAGE_KEY}-${targetId}`, encryptedString);
+    // Always save to localStorage immediately (instant persistence)
+    saveToLocalStorage(storageKey, store);
+
+    // Debounce Firestore saves to avoid rapid writes
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+
+    if (userId !== "guest") {
+      saveTimerRef.current = setTimeout(() => {
+        if (mountedRef.current && activeUserRef.current === userId) {
+          // Save PLAIN store to Firestore (no encryption — Firestore security rules protect it)
+          saveUserData(userId, store);
+        }
+      }, 800);
     }
 
-    // Sync encrypted payload + store to Firestore cloud if logged in
-    if (targetId && targetId !== "guest-user") {
-      saveUserData(targetId, { encryptedPayload: encryptedString, ...store });
-    }
-  }, [store, isHydrated, isAuthInitialized, currentUserId]);
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, [store]);
 
-  // Plans
+  // ── Plans ──────────────────────────────────────────────────────────────────
+
   const addPlan = useCallback((plan: Omit<Plan, "id" | "createdAt">) => {
     const newPlan: Plan = { ...plan, id: generateId(), createdAt: new Date().toISOString() };
     setStore((prev) => ({ ...prev, plans: [...prev.plans, newPlan] }));
@@ -228,7 +224,8 @@ export function NeoFlowProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  // Tasks
+  // ── Tasks ──────────────────────────────────────────────────────────────────
+
   const addTask = useCallback((task: Omit<Task, "id" | "createdAt">) => {
     const newTask: Task = { ...task, id: generateId(), createdAt: new Date().toISOString() };
     setStore((prev) => ({ ...prev, tasks: [...prev.tasks, newTask] }));
@@ -260,7 +257,8 @@ export function NeoFlowProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  // Financial Goals
+  // ── Financial Goals ────────────────────────────────────────────────────────
+
   const addFinancialGoal = useCallback((goal: Omit<FinancialGoal, "id" | "createdAt">) => {
     const newGoal: FinancialGoal = { ...goal, id: generateId(), createdAt: new Date().toISOString() };
     setStore((prev) => ({ ...prev, financialGoals: [...prev.financialGoals, newGoal] }));
@@ -350,10 +348,7 @@ export function NeoFlowProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const clearAllTransactions = useCallback(() => {
-    setStore((prev) => ({
-      ...prev,
-      transactions: [],
-    }));
+    setStore((prev) => ({ ...prev, transactions: [] }));
   }, []);
 
   return (

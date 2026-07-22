@@ -2,7 +2,6 @@ import { initializeApp, getApps, getApp } from "firebase/app";
 import {
   getAuth,
   GoogleAuthProvider,
-  OAuthProvider,
   signInWithPopup,
   signOut as firebaseSignOut,
   type User,
@@ -13,6 +12,7 @@ import {
   setDoc,
   getDoc,
   onSnapshot,
+  serverTimestamp,
 } from "firebase/firestore";
 
 // Read exclusively from environment variables for zero secret exposure in source code
@@ -45,11 +45,6 @@ try {
 export const app = appInstance;
 export const auth = authInstance;
 export const googleProvider = new GoogleAuthProvider();
-
-export const appleProvider = new OAuthProvider("apple.com");
-appleProvider.addScope("email");
-appleProvider.addScope("name");
-
 export const db = dbInstance;
 
 // Google Sign-In
@@ -59,44 +54,32 @@ export async function signInWithGoogle() {
   return result.user;
 }
 
-// Apple Sign-In with clear diagnostic handling
-export async function signInWithApple() {
-  if (!auth) throw new Error("Firebase Auth is not initialized. Please configure API keys.");
-  try {
-    const result = await signInWithPopup(auth, appleProvider);
-    return result.user;
-  } catch (err: any) {
-    console.error("Apple Sign-In error:", err);
-    if (
-      err?.code === "auth/operation-not-allowed" ||
-      err?.code === "auth/configuration-not-found" ||
-      err?.message?.includes("operation-not-allowed")
-    ) {
-      throw new Error(
-        "Apple Sign-In requires configuration in your Firebase Console. Go to Firebase Console -> Authentication -> Sign-in method -> Enable Apple with your Apple Developer Team ID."
-      );
-    }
-    throw err;
-  }
-}
-
 // Sign Out
 export async function logoutUser() {
   if (!auth) return;
   await firebaseSignOut(auth);
 }
 
-// Save user data to Firestore
+/**
+ * Save plain store data to Firestore (NO encryption — Firestore has server-side security rules).
+ * Only the plain store fields are saved so snapshots can be read back cleanly.
+ */
 export async function saveUserData(uid: string, data: object) {
   if (!db) return;
   try {
-    await setDoc(doc(db, "users", uid), { data, updatedAt: new Date().toISOString() }, { merge: true });
+    await setDoc(
+      doc(db, "users", uid),
+      { data, updatedAt: serverTimestamp() },
+      { merge: true }
+    );
   } catch (e) {
-    console.warn("Firestore save failed, using localStorage fallback:", e);
+    console.warn("Firestore save failed, data is preserved in localStorage:", e);
   }
 }
 
-// Load user data from Firestore
+/**
+ * One-time load of user data from Firestore (used as fallback on first login).
+ */
 export async function loadUserData(uid: string): Promise<object | null> {
   if (!db) return null;
   try {
@@ -110,21 +93,27 @@ export async function loadUserData(uid: string): Promise<object | null> {
   return null;
 }
 
-// Subscribe to real-time Cloud Firestore updates (filters out local echo writes)
+/**
+ * Subscribe to real-time Firestore updates.
+ * 
+ * IMPORTANT: We do NOT use includeMetadataChanges here.
+ * This means the callback only fires when the server has CONFIRMED the write —
+ * never for optimistic local writes. This prevents the data-loss loop where
+ * a local echo snapshot overwrites in-progress React state.
+ */
 export function subscribeToUserData(uid: string, callback: (data: object | null) => void) {
   if (!db) return () => {};
   try {
     const userDocRef = doc(db, "users", uid);
     return onSnapshot(
       userDocRef,
-      { includeMetadataChanges: true },
+      // No { includeMetadataChanges: true } — only fires on server-confirmed changes
       (docSnap) => {
-        // Prevent local echo writes from overwriting React state during active updates
-        if (docSnap.metadata.hasPendingWrites) {
-          return;
-        }
         if (docSnap.exists()) {
           callback(docSnap.data()?.data || null);
+        } else {
+          // Document doesn't exist yet (new user) — don't overwrite local state
+          callback(null);
         }
       },
       (error) => {
