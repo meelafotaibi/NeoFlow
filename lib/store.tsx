@@ -120,7 +120,7 @@ export function NeoFlowProvider({ children }: { children: ReactNode }) {
     setIsHydrated(true);
   }, []);
 
-  // 2. Auth & Real-Time Sync Listener: Subscribes to Firestore for instant Phone & PC sync
+  // 2. Auth & Real-Time Sync Listener: Subscribes to Firestore for instant Phone & PC sync with strict UID isolation
   useEffect(() => {
     if (!auth) return;
 
@@ -136,35 +136,33 @@ export function NeoFlowProvider({ children }: { children: ReactNode }) {
         activeUserRef.current = user.uid;
         setCurrentUserId(user.uid);
 
-        // Try local user cache first for instant UI loading
-        const localUserCache = loadLocalStorageKey(`${STORAGE_KEY}-${user.uid}`);
-        if (localUserCache && (localUserCache.plans.length > 0 || localUserCache.financialGoals.length > 0 || localUserCache.savedAmount > 0)) {
+        // Load ONLY this specific user's local cache for instant UI rendering
+        const userSpecificKey = `${STORAGE_KEY}-${user.uid}`;
+        const localUserCache = loadLocalStorageKey(userSpecificKey);
+        
+        if (localUserCache) {
           setStore(localUserCache);
+        } else {
+          // Reset store for new user account to avoid leaking previous account/guest data
+          setStore(emptyStore);
         }
 
-        // Subscribe to real-time Firestore cloud changes (Phone <-> PC sync)
+        // Subscribe to real-time Firestore cloud changes for THIS user
         snapshotUnsub = subscribeToUserData(user.uid, (cloudData) => {
           const parsedCloud = parseStore(cloudData);
-          if (parsedCloud && (parsedCloud.plans.length > 0 || parsedCloud.tasks.length > 0 || parsedCloud.financialGoals.length > 0 || parsedCloud.savedAmount > 0)) {
+          if (parsedCloud) {
             setStore(parsedCloud);
             if (typeof window !== "undefined") {
               const encrypted = encryptVaultData(parsedCloud);
-              localStorage.setItem(`${STORAGE_KEY}-${user.uid}`, encrypted);
-            }
-          } else {
-            // Push initial local data to cloud if cloud document is new
-            const localFallback = localUserCache || getBestLocalStorageData(user.uid);
-            if (localFallback.plans.length > 0 || localFallback.financialGoals.length > 0 || localFallback.savedAmount > 0) {
-              setStore(localFallback);
-              saveUserData(user.uid, { encryptedPayload: encryptVaultData(localFallback), ...localFallback });
+              localStorage.setItem(userSpecificKey, encrypted);
             }
           }
         });
       } else {
-        // User logged out: switch to guest session without wiping user account key
+        // User logged out: switch to guest session isolated under guest key
         activeUserRef.current = "guest-user";
         setCurrentUserId("guest-user");
-        const guestData = getBestLocalStorageData("guest-user");
+        const guestData = loadLocalStorageKey(`${STORAGE_KEY}-guest-user`) || emptyStore;
         setStore(guestData);
       }
     });
@@ -175,17 +173,16 @@ export function NeoFlowProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // 3. Auto-save to LocalStorage and Firestore whenever store updates (with client-side encryption)
+  // 3. Auto-save to LocalStorage and Firestore whenever store updates (strictly user-isolated)
   useEffect(() => {
     if (!isHydrated) return;
 
     const targetId = activeUserRef.current || currentUserId || "guest-user";
     const encryptedString = encryptVaultData(store);
 
-    // Save encrypted vault payload to user-specific local key
+    // Save encrypted vault payload ONLY to user-specific local key
     if (typeof window !== "undefined") {
       localStorage.setItem(`${STORAGE_KEY}-${targetId}`, encryptedString);
-      localStorage.setItem(STORAGE_KEY, encryptedString);
     }
 
     // Sync encrypted payload + store to Firestore cloud if logged in
