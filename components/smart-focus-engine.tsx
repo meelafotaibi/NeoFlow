@@ -261,15 +261,15 @@ export function SmartFocusEngine() {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-lg font-bold gradient-text">Neo Proactive AI Co-Pilot</h2>
+              <h2 className="text-lg font-bold gradient-text">Neo AI Co-Pilot</h2>
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/20 text-primary border border-primary/30 font-bold uppercase tracking-wider flex items-center gap-1">
                 <Bot className="h-3 w-3 text-primary animate-pulse" />
-                C++ Engine Auto-Execute
+                Active Engine
               </span>
             </div>
             <p className="text-xs text-muted-foreground flex items-center gap-1">
               <Cpu className="h-3 w-3 text-accent" />
-              Intelligent query parsing with instant automatic Goal, Plan & Task creation
+              Intelligent query understanding for Goals, Plans & Tasks
             </p>
           </div>
         </div>

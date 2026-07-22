@@ -59,7 +59,7 @@ export function PdfPrintExport() {
     const htmlContent = `<!DOCTYPE html>
 <html>
 <head>
-  <title>Neo Flow — Full Dashboard Report</title>
+  <title>NeoFlow — Executive Report</title>
   <meta charset="utf-8"/>
   <style>${css}</style>
 </head>
@@ -69,7 +69,7 @@ export function PdfPrintExport() {
 <div class="page">
   <div class="brand">
     <div class="brand-dot">N</div>
-    <span class="brand-name">Neo Flow</span>
+    <span class="brand-name">NeoFlow</span>
   </div>
   <span class="page-label">Page 1 of 5</span>
 
@@ -105,7 +105,7 @@ export function PdfPrintExport() {
   </div>
 
   <div class="footer">
-    <span>Neo Flow Personal AI Dashboard</span>
+    <span>NeoFlow Personal AI Dashboard</span>
     <span>${todayStr}</span>
   </div>
 </div>
@@ -114,11 +114,11 @@ export function PdfPrintExport() {
 <div class="page">
   <div class="brand">
     <div class="brand-dot">N</div>
-    <span class="brand-name">Neo Flow</span>
+    <span class="brand-name">NeoFlow</span>
   </div>
   <span class="page-label">Page 2 of 5</span>
 
-  <h2 class="section-title">📋 Active Plans</h2>
+  <h2 class="section-title">Active Growth Plans</h2>
   <p class="section-desc">All active growth plans, habits, and milestones</p>
 
   ${plans.length > 0 ? `
@@ -146,14 +146,14 @@ export function PdfPrintExport() {
             </div>
           </td>
           <td>${new Date(p.deadline).toLocaleDateString()}</td>
-          <td>${checkins} days ✓</td>
+          <td>${checkins} days completed</td>
         </tr>`;
       }).join("")}
     </tbody>
   </table>` : `<p style="color:#94A3B8;text-align:center;padding:40px">No plans created yet.</p>`}
 
   <div class="footer">
-    <span>Neo Flow — Plans Report</span>
+    <span>NeoFlow — Growth Plans Report</span>
     <span>${todayStr}</span>
   </div>
 </div>
@@ -162,11 +162,11 @@ export function PdfPrintExport() {
 <div class="page">
   <div class="brand">
     <div class="brand-dot">N</div>
-    <span class="brand-name">Neo Flow</span>
+    <span class="brand-name">NeoFlow</span>
   </div>
   <span class="page-label">Page 3 of 5</span>
 
-  <h2 class="section-title">⚡ Tasks Board</h2>
+  <h2 class="section-title">Tasks & Operations Board</h2>
   <p class="section-desc">All tasks grouped by priority and status</p>
 
   ${tasks.length > 0 ? `
@@ -198,7 +198,7 @@ export function PdfPrintExport() {
   </table>` : `<p style="color:#94A3B8;text-align:center;padding:40px">No tasks created yet.</p>`}
 
   <div class="footer">
-    <span>Neo Flow — Tasks Report</span>
+    <span>NeoFlow — Tasks Report</span>
     <span>${todayStr}</span>
   </div>
 </div>
@@ -207,12 +207,12 @@ export function PdfPrintExport() {
 <div class="page">
   <div class="brand">
     <div class="brand-dot">N</div>
-    <span class="brand-name">Neo Flow</span>
+    <span class="brand-name">NeoFlow</span>
   </div>
   <span class="page-label">Page 4 of 5</span>
 
-  <h2 class="section-title">💰 Financial Goals & Wallet</h2>
-  <p class="section-desc">Savings wallet, financial goals, and recent transactions</p>
+  <h2 class="section-title">Financial Goals & Ledger</h2>
+  <p class="section-desc">Savings wallet, financial goals, and transaction history</p>
 
   <div class="stat-grid" style="grid-template-columns: repeat(2, 1fr); margin-bottom: 24px;">
     <div class="stat-box">
@@ -228,13 +228,13 @@ export function PdfPrintExport() {
   <h2 class="section-title" style="font-size:14px;margin-bottom:12px">Goals</h2>
   ${financialGoals.length > 0 ? `
   <table>
-    <thead><tr><th>Goal</th><th>Price</th><th>Status</th><th>Can Afford</th></tr></thead>
+    <thead><tr><th>Goal</th><th>Price</th><th>Status</th><th>Affordable</th></tr></thead>
     <tbody>
       ${financialGoals.map((g) => `<tr>
         <td><strong>${g.name}</strong></td>
         <td>$${g.price.toLocaleString()}</td>
-        <td><span class="badge ${g.isPurchased ? "badge-green" : "badge-blue"}">${g.isPurchased ? "Purchased ✓" : "Active"}</span></td>
-        <td>${savedAmount >= g.price ? '<span class="badge badge-green">Yes ✓</span>' : '<span class="badge badge-yellow">Not yet</span>'}</td>
+        <td><span class="badge ${g.isPurchased ? "badge-green" : "badge-blue"}">${g.isPurchased ? "Fulfilled" : "Active"}</span></td>
+        <td>${savedAmount >= g.price ? '<span class="badge badge-green">Yes</span>' : '<span class="badge badge-yellow">Saving</span>'}</td>
       </tr>`).join("")}
     </tbody>
   </table>` : `<p style="color:#94A3B8;text-align:center;padding:24px">No financial goals yet.</p>`}
@@ -258,7 +258,7 @@ export function PdfPrintExport() {
   </table>` : `<p style="color:#94A3B8;text-align:center;padding:24px">No transactions yet.</p>`}
 
   <div class="footer">
-    <span>Neo Flow — Financial Report</span>
+    <span>NeoFlow — Financial Report</span>
     <span>${todayStr}</span>
   </div>
 </div>
@@ -267,11 +267,11 @@ export function PdfPrintExport() {
 <div class="page">
   <div class="brand">
     <div class="brand-dot">N</div>
-    <span class="brand-name">Neo Flow</span>
+    <span class="brand-name">NeoFlow</span>
   </div>
   <span class="page-label">Page 5 of 5</span>
 
-  <h2 class="section-title">📊 Analytics & Insights Summary</h2>
+  <h2 class="section-title">Analytics & Executive Insights</h2>
   <p class="section-desc">Productivity metrics, streaks, and performance overview</p>
 
   <div class="stat-grid">
@@ -312,7 +312,7 @@ export function PdfPrintExport() {
         return `<tr>
           <td><strong>${p.title}</strong></td>
           <td>${p.category}</td>
-          <td>${checkins} days ✅</td>
+          <td>${checkins} days completed</td>
           <td>${p.progress}%</td>
         </tr>`;
       }).join("")}
@@ -320,12 +320,12 @@ export function PdfPrintExport() {
   </table>` : `<p style="color:#94A3B8;text-align:center;padding:24px">No plans yet.</p>`}
 
   <div style="margin-top:40px;padding:20px;background:#F8FAFC;border-radius:12px;border:1px solid #E2E8F0;text-align:center">
-    <p style="font-size:14px;font-weight:700;color:#0F172A">Keep building. Keep executing. Keep winning. 🚀</p>
-    <p style="font-size:11px;color:#64748B;margin-top:6px">Generated by Neo Flow Personal AI Dashboard · ${todayStr}</p>
+    <p style="font-size:14px;font-weight:700;color:#0F172A">Optimized Executive Performance Report</p>
+    <p style="font-size:11px;color:#64748B;margin-top:6px">Generated by NeoFlow Personal AI Dashboard · ${todayStr}</p>
   </div>
 
   <div class="footer">
-    <span>Neo Flow — Analytics Summary</span>
+    <span>NeoFlow — Analytics Summary</span>
     <span>End of Report</span>
   </div>
 </div>

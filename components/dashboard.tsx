@@ -30,11 +30,21 @@ interface DashboardProps {
 }
 
 function getGreeting(name: string) {
-  const hour = new Date().getHours();
-  if (hour < 12) return `Good morning, ${name} ☀️`;
-  if (hour < 17) return `Good afternoon, ${name} 🌤️`;
-  if (hour < 21) return `Good evening, ${name} 🌅`;
-  return `Good night, ${name} 🌙`;
+  const now = new Date();
+  const hour = now.getHours();
+  const dateString = now.toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+
+  let greeting = `Good morning, ${name}`;
+  if (hour >= 12 && hour < 17) greeting = `Good afternoon, ${name}`;
+  else if (hour >= 17 && hour < 21) greeting = `Good evening, ${name}`;
+  else if (hour >= 21 || hour < 5) greeting = `Good night, ${name}`;
+
+  return { greeting, dateString };
 }
 
 export function Dashboard({ onNavigate }: DashboardProps) {
@@ -47,6 +57,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
   }, []);
 
   const displayName = firebaseUser?.displayName?.split(" ")[0] || firebaseUser?.email?.split("@")[0] || "there";
+  const { greeting, dateString } = getGreeting(displayName);
 
   // Get nearest deadline from plans and tasks
   const allDeadlines = [
@@ -75,9 +86,11 @@ export function Dashboard({ onNavigate }: DashboardProps) {
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold gradient-text">{getGreeting(displayName)}</h1>
-          <p className="text-muted-foreground mt-1">
-            Here&apos;s your life command center — let&apos;s make today count.
+          <h1 className="text-3xl font-bold gradient-text">{greeting}</h1>
+          <p className="text-muted-foreground mt-1 text-xs font-mono flex items-center gap-2">
+            <span>{dateString}</span>
+            <span>|</span>
+            <span>Life OS Command Center</span>
           </p>
         </div>
         <div className="flex gap-2 flex-wrap sm:flex-nowrap">

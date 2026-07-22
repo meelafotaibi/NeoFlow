@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState, useCallback, useRef, ty
 import type { Plan, Task, FinancialGoal, NeoFlowStore, TransactionRecord } from "./types";
 import { auth, saveUserData, loadUserData } from "./firebase";
 import { onAuthStateChanged } from "firebase/auth";
+import { encryptVaultData, decryptVaultData } from "./crypto-vault";
 
 const STORAGE_KEY = "neoflow-data";
 
@@ -33,9 +34,11 @@ interface NeoFlowContextType extends NeoFlowStore {
   deleteFinancialGoal: (id: string) => void;
   purchaseFinancialGoal: (id: string) => void;
   unpurchaseFinancialGoal: (id: string) => void;
-  // Saved Amount
+  // Saved Amount & Transactions
   updateSavedAmount: (amount: number) => void;
   addToSavings: (amount: number) => void;
+  deleteTransaction: (id: string) => void;
+  clearAllTransactions: () => void;
 }
 
 const NeoFlowContext = createContext<NeoFlowContextType | null>(null);
@@ -57,13 +60,14 @@ function parseStore(raw: unknown): NeoFlowStore | null {
   return { plans, tasks, financialGoals, savedAmount, transactions };
 }
 
-// Safely load local storage for a specific key
+// Safely load encrypted local storage for a specific key
 function loadLocalStorageKey(key: string): NeoFlowStore | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = localStorage.getItem(key);
     if (raw) {
-      return parseStore(JSON.parse(raw));
+      const decrypted = decryptVaultData(raw);
+      return parseStore(decrypted);
     }
   } catch {}
   return null;
@@ -155,22 +159,22 @@ export function NeoFlowProvider({ children }: { children: ReactNode }) {
     return () => unsubscribe();
   }, []);
 
-  // 3. Auto-save to LocalStorage and Firestore whenever store updates
+  // 3. Auto-save to LocalStorage and Firestore whenever store updates (with client-side encryption)
   useEffect(() => {
     if (!isHydrated) return;
 
     const targetId = activeUserRef.current || currentUserId || "guest-user";
-    const payload = JSON.stringify(store);
+    const encryptedString = encryptVaultData(store);
 
-    // Save to user-specific local key
+    // Save encrypted vault payload to user-specific local key
     if (typeof window !== "undefined") {
-      localStorage.setItem(`${STORAGE_KEY}-${targetId}`, payload);
-      localStorage.setItem(STORAGE_KEY, payload);
+      localStorage.setItem(`${STORAGE_KEY}-${targetId}`, encryptedString);
+      localStorage.setItem(STORAGE_KEY, encryptedString);
     }
 
-    // Sync to Firestore cloud if logged in
+    // Sync encrypted payload + store to Firestore cloud if logged in
     if (targetId && targetId !== "guest-user") {
-      saveUserData(targetId, store);
+      saveUserData(targetId, { encryptedPayload: encryptedString, ...store });
     }
   }, [store, isHydrated, currentUserId]);
 
@@ -317,6 +321,20 @@ export function NeoFlowProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const deleteTransaction = useCallback((id: string) => {
+    setStore((prev) => ({
+      ...prev,
+      transactions: (prev.transactions || []).filter((tx) => tx.id !== id),
+    }));
+  }, []);
+
+  const clearAllTransactions = useCallback(() => {
+    setStore((prev) => ({
+      ...prev,
+      transactions: [],
+    }));
+  }, []);
+
   return (
     <NeoFlowContext.Provider
       value={{
@@ -337,6 +355,8 @@ export function NeoFlowProvider({ children }: { children: ReactNode }) {
         unpurchaseFinancialGoal,
         updateSavedAmount,
         addToSavings,
+        deleteTransaction,
+        clearAllTransactions,
       }}
     >
       {children}

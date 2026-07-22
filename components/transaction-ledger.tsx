@@ -5,12 +5,12 @@ import { GlassCard } from "@/components/glass-card";
 import { useNeoFlow } from "@/lib/store";
 import { formatCurrency } from "@/lib/countdown";
 import { CurrencySymbol } from "@/components/currency-symbol";
-import { History, ArrowUpRight, ArrowDownLeft, ShoppingBag, RotateCcw, ChevronDown, ChevronUp } from "lucide-react";
+import { History, ArrowUpRight, ArrowDownLeft, ShoppingBag, RotateCcw, ChevronDown, ChevronUp, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
 export function TransactionLedger() {
-  const { transactions = [] } = useNeoFlow();
+  const { transactions = [], deleteTransaction, clearAllTransactions } = useNeoFlow();
   const [isExpanded, setIsExpanded] = useState(false);
 
   if (transactions.length === 0) {
@@ -33,16 +33,22 @@ export function TransactionLedger() {
 
   return (
     <GlassCard className="space-y-3 border border-border/40">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <h3 className="font-bold text-sm text-foreground flex items-center gap-1.5">
           <History className="h-4 w-4 text-primary" />
           Financial Transaction Ledger & History
         </h3>
         
         <div className="flex items-center gap-2">
-          <span className="text-[11px] font-mono text-muted-foreground">
-            {transactions.length} record{transactions.length > 1 ? "s" : ""}
-          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={clearAllTransactions}
+            className="h-7 text-xs text-destructive hover:bg-destructive/20 font-medium"
+            title="Clear test deposits and transaction history"
+          >
+            <Trash2 className="h-3.5 w-3.5 mr-1" /> Clear History
+          </Button>
 
           {transactions.length > 5 && (
             <Button
@@ -53,7 +59,7 @@ export function TransactionLedger() {
             >
               {isExpanded ? (
                 <>
-                  <ChevronUp className="h-3.5 w-3.5 mr-1" /> Collapse
+                  <ChevronUp className="h-3.5 w-3.5 mr-1" /> Minimize
                 </>
               ) : (
                 <>
@@ -79,7 +85,7 @@ export function TransactionLedger() {
           return (
             <div
               key={tx.id}
-              className="glass p-2.5 rounded-lg flex items-center justify-between border border-border/30 text-xs"
+              className="glass p-2.5 rounded-lg flex items-center justify-between border border-border/30 text-xs group"
             >
               <div className="flex items-center gap-2.5 min-w-0">
                 <div className={cn("p-1.5 rounded-lg border shrink-0", info.color)}>
@@ -93,15 +99,25 @@ export function TransactionLedger() {
                 </div>
               </div>
 
-              <div
-                className={cn(
-                  "font-mono font-bold text-xs shrink-0 ml-2 flex items-center",
-                  isPositive ? "text-green-400" : "text-foreground"
-                )}
-              >
-                {isPositive ? "+" : "-"}
-                <CurrencySymbol className="h-[0.85em] mx-0.5" />
-                {formatCurrency(tx.amount)}
+              <div className="flex items-center gap-2 shrink-0 ml-2">
+                <div
+                  className={cn(
+                    "font-mono font-bold text-xs flex items-center",
+                    isPositive ? "text-green-400" : "text-foreground"
+                  )}
+                >
+                  {isPositive ? "+" : "-"}
+                  <CurrencySymbol className="h-[0.85em] mx-0.5" />
+                  {formatCurrency(tx.amount)}
+                </div>
+
+                <button
+                  onClick={() => deleteTransaction(tx.id)}
+                  className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all p-1"
+                  title="Remove deposit record"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
               </div>
             </div>
           );

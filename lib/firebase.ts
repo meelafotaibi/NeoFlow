@@ -44,7 +44,15 @@ try {
 export const app = appInstance;
 export const auth = authInstance;
 export const googleProvider = new GoogleAuthProvider();
+
 export const appleProvider = new OAuthProvider("apple.com");
+appleProvider.addScope("email");
+appleProvider.addScope("name");
+appleProvider.setCustomParameters({
+  locale: "en",
+  redirect_uri: "https://neoflow-4df47.firebaseapp.com/__/auth/handler",
+});
+
 export const db = dbInstance;
 
 // Google Sign-In
