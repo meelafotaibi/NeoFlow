@@ -18,23 +18,19 @@ const emptyStore: NeoFlowStore = {
 
 interface NeoFlowContextType extends NeoFlowStore {
   currentUserId: string | null;
-  // Plans
   addPlan: (plan: Omit<Plan, "id" | "createdAt">) => void;
   updatePlan: (id: string, plan: Partial<Plan>) => void;
   deletePlan: (id: string) => void;
   toggleDailyCheckin: (planId: string, date: string) => void;
-  // Tasks
   addTask: (task: Omit<Task, "id" | "createdAt">) => void;
   updateTask: (id: string, task: Partial<Task>) => void;
   deleteTask: (id: string) => void;
   toggleSubtask: (taskId: string, subtaskId: string) => void;
-  // Financial Goals
   addFinancialGoal: (goal: Omit<FinancialGoal, "id" | "createdAt">) => void;
   updateFinancialGoal: (id: string, goal: Partial<FinancialGoal>) => void;
   deleteFinancialGoal: (id: string) => void;
   purchaseFinancialGoal: (id: string) => void;
   unpurchaseFinancialGoal: (id: string) => void;
-  // Saved Amount & Transactions
   updateSavedAmount: (amount: number) => void;
   addToSavings: (amount: number) => void;
   deleteTransaction: (id: string) => void;
@@ -47,12 +43,11 @@ function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
-/** Parse a raw object into a clean NeoFlowStore — handles plain JSON from Firestore */
 function parseStore(raw: unknown): NeoFlowStore | null {
   if (!raw || typeof raw !== "object") return null;
   const parsed = raw as Record<string, unknown>;
 
-  // Handle encrypted local storage payload (only used in localStorage, NOT in Firestore)
+  // Decrypt if this came from localStorage (encrypted)
   if (typeof parsed.encryptedPayload === "string") {
     const decrypted = decryptVaultData(parsed.encryptedPayload);
     if (decrypted) return parseStore(decrypted);
@@ -68,56 +63,78 @@ function parseStore(raw: unknown): NeoFlowStore | null {
   return { plans, tasks, financialGoals, savedAmount, transactions };
 }
 
-/** Load + decrypt from localStorage by key */
 function loadFromLocalStorage(key: string): NeoFlowStore | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = localStorage.getItem(key);
     if (!raw) return null;
-    // Try decrypting first
     const decrypted = decryptVaultData(raw);
     if (decrypted) return parseStore(decrypted);
-    // Fallback: try plain JSON
     return parseStore(JSON.parse(raw));
   } catch {
     return null;
   }
 }
 
-/** Save encrypted store to localStorage */
 function saveToLocalStorage(key: string, data: NeoFlowStore) {
   if (typeof window === "undefined") return;
   try {
-    const encrypted = encryptVaultData(data);
-    localStorage.setItem(key, encrypted);
-  } catch (e) {
-    console.warn("localStorage save error:", e);
-  }
+    localStorage.setItem(key, encryptVaultData(data));
+  } catch {}
 }
 
 export function NeoFlowProvider({ children }: { children: ReactNode }) {
   const [store, setStore] = useState<NeoFlowStore>(emptyStore);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
-  // Refs to avoid stale closures and prevent save-then-load loops
+  // Track current user outside React state to avoid stale closures
   const activeUserRef = useRef<string | null>(null);
-  const isLoadingFromCloudRef = useRef(false); // true while we're applying a cloud snapshot
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
+
+  /**
+   * KEY FIX: This ref tracks whether we have a Firestore write in-flight.
+   * When true, ALL incoming Firestore snapshots are ignored.
+   * This prevents stale cloud data from overwriting fresh local changes.
+   */
+  const writeInFlightRef = useRef(false);
+  const writeGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Debounce timer for Firestore saves
+  const saveDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
 
-  // Auth listener + Firestore real-time sync
+  /**
+   * Perform a cloud save, blocking snapshot application while in-flight.
+   * After the write resolves, we keep blocking for another 1.5s grace period
+   * so the server-confirmed snapshot (which matches local state) doesn't overwrite.
+   */
+  const doCloudSave = useCallback(async (uid: string, data: NeoFlowStore) => {
+    writeInFlightRef.current = true;
+    if (writeGraceTimerRef.current) clearTimeout(writeGraceTimerRef.current);
+    try {
+      await saveUserData(uid, data);
+    } catch (e) {
+      console.warn("Cloud save error:", e);
+    } finally {
+      // Keep blocking snapshots for 1.5s after the write completes —
+      // the server snapshot will arrive in this window and match local state anyway.
+      writeGraceTimerRef.current = setTimeout(() => {
+        writeInFlightRef.current = false;
+      }, 1500);
+    }
+  }, []);
+
+  // Auth listener + Firestore real-time subscription
   useEffect(() => {
     if (!auth) return;
 
     let snapshotUnsub: (() => void) | null = null;
 
     const authUnsub = onAuthStateChanged(auth, (user) => {
-      // Clean up previous snapshot listener when auth changes
       if (snapshotUnsub) {
         snapshotUnsub();
         snapshotUnsub = null;
@@ -129,29 +146,34 @@ export function NeoFlowProvider({ children }: { children: ReactNode }) {
 
         const userKey = `${STORAGE_KEY}-${user.uid}`;
 
-        // 1. Immediately show local cache for instant UI (no loading flicker)
+        // Show local cache immediately (no loading flicker)
         const localCache = loadFromLocalStorage(userKey);
         if (localCache) {
           setStore(localCache);
         }
 
-        // 2. Subscribe to cloud — fires only on server-confirmed writes
+        // Subscribe to cloud — only fires on server-confirmed writes
         snapshotUnsub = subscribeToUserData(user.uid, (cloudData) => {
           if (!mountedRef.current) return;
+
+          // CRITICAL: Skip snapshot if we have a write in-flight.
+          // The cloud data may be stale (before our write completed).
+          if (writeInFlightRef.current) {
+            console.log("[NeoFlow] Skipping snapshot — write in-flight");
+            return;
+          }
+
           if (!cloudData) return; // New user — keep local state
 
           const parsed = parseStore(cloudData);
           if (!parsed) return;
 
-          // Apply cloud data and update local cache
-          isLoadingFromCloudRef.current = true;
+          // Apply cloud data (only when we have no pending local writes)
           setStore(parsed);
           saveToLocalStorage(userKey, parsed);
-          // Reset flag after React has processed the state update
-          setTimeout(() => { isLoadingFromCloudRef.current = false; }, 100);
         });
       } else {
-        // Guest / logged out
+        // Guest mode
         activeUserRef.current = "guest";
         setCurrentUserId(null);
         const guestData = loadFromLocalStorage(`${STORAGE_KEY}-guest`) || emptyStore;
@@ -163,36 +185,28 @@ export function NeoFlowProvider({ children }: { children: ReactNode }) {
       authUnsub();
       if (snapshotUnsub) snapshotUnsub();
     };
-  }, []);
+  }, [doCloudSave]);
 
-  // Debounced auto-save: saves to localStorage immediately, Firestore after 800ms idle
-  // Skips saving when we're in the middle of loading a cloud snapshot (prevents echo loop)
+  // Auto-save: localStorage immediately, Firestore debounced at 600ms
   useEffect(() => {
-    if (isLoadingFromCloudRef.current) return;
-    if (!activeUserRef.current) return;
-
     const userId = activeUserRef.current;
+    if (!userId) return;
+
     const storageKey = `${STORAGE_KEY}-${userId}`;
 
-    // Always save to localStorage immediately (instant persistence)
+    // Always persist locally immediately
     saveToLocalStorage(storageKey, store);
 
-    // Debounce Firestore saves to avoid rapid writes
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-
+    // Debounced cloud sync (skip for guests)
     if (userId !== "guest") {
-      saveTimerRef.current = setTimeout(() => {
+      if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current);
+      saveDebounceRef.current = setTimeout(() => {
         if (mountedRef.current && activeUserRef.current === userId) {
-          // Save PLAIN store to Firestore (no encryption — Firestore security rules protect it)
-          saveUserData(userId, store);
+          doCloudSave(userId, store);
         }
-      }, 800);
+      }, 600);
     }
-
-    return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    };
-  }, [store]);
+  }, [store, doCloudSave]);
 
   // ── Plans ──────────────────────────────────────────────────────────────────
 
