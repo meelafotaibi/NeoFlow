@@ -47,7 +47,7 @@ function parseStore(raw: unknown): NeoFlowStore | null {
   if (!raw || typeof raw !== "object") return null;
   const parsed = raw as Record<string, unknown>;
 
-  // Decrypt if this came from localStorage (encrypted)
+  // Handle encrypted local storage payload if present
   if (typeof parsed.encryptedPayload === "string") {
     const decrypted = decryptVaultData(parsed.encryptedPayload);
     if (decrypted) return parseStore(decrypted);
@@ -87,14 +87,20 @@ export function NeoFlowProvider({ children }: { children: ReactNode }) {
   const [store, setStore] = useState<NeoFlowStore>(emptyStore);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
-  // Track current user outside React state to avoid stale closures
   const activeUserRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
 
   /**
-   * KEY FIX: This ref tracks whether we have a Firestore write in-flight.
-   * When true, ALL incoming Firestore snapshots are ignored.
-   * This prevents stale cloud data from overwriting fresh local changes.
+   * CRITICAL FIX FOR CROSS-DEVICE SYNC:
+   * isCloudLoadedRef prevents a newly refreshed device (or phone login) from
+   * auto-saving its initial empty React state over valid Firestore cloud data
+   * BEFORE the initial cloud snapshot has arrived and loaded.
+   */
+  const isCloudLoadedRef = useRef(false);
+
+  /**
+   * writeInFlightRef blocks applying incoming snapshots during an active local write
+   * to avoid local state flickers while a save is processing.
    */
   const writeInFlightRef = useRef(false);
   const writeGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -108,11 +114,12 @@ export function NeoFlowProvider({ children }: { children: ReactNode }) {
   }, []);
 
   /**
-   * Perform a cloud save, blocking snapshot application while in-flight.
-   * After the write resolves, we keep blocking for another 1.5s grace period
-   * so the server-confirmed snapshot (which matches local state) doesn't overwrite.
+   * Save store data to Firestore cloud safely
    */
   const doCloudSave = useCallback(async (uid: string, data: NeoFlowStore) => {
+    // Only save if cloud initial sync has completed
+    if (!isCloudLoadedRef.current) return;
+
     writeInFlightRef.current = true;
     if (writeGraceTimerRef.current) clearTimeout(writeGraceTimerRef.current);
     try {
@@ -120,11 +127,9 @@ export function NeoFlowProvider({ children }: { children: ReactNode }) {
     } catch (e) {
       console.warn("Cloud save error:", e);
     } finally {
-      // Keep blocking snapshots for 1.5s after the write completes —
-      // the server snapshot will arrive in this window and match local state anyway.
       writeGraceTimerRef.current = setTimeout(() => {
         writeInFlightRef.current = false;
-      }, 1500);
+      }, 800);
     }
   }, []);
 
@@ -143,39 +148,49 @@ export function NeoFlowProvider({ children }: { children: ReactNode }) {
       if (user) {
         activeUserRef.current = user.uid;
         setCurrentUserId(user.uid);
+        isCloudLoadedRef.current = false; // Reset cloud load flag for this user session
 
         const userKey = `${STORAGE_KEY}-${user.uid}`;
 
-        // Show local cache immediately (no loading flicker)
+        // 1. Show local cache immediately for instant UI responsiveness
         const localCache = loadFromLocalStorage(userKey);
         if (localCache) {
           setStore(localCache);
         }
 
-        // Subscribe to cloud — only fires on server-confirmed writes
+        // 2. Subscribe to real-time Firestore cloud data
         snapshotUnsub = subscribeToUserData(user.uid, (cloudData) => {
           if (!mountedRef.current) return;
 
-          // CRITICAL: Skip snapshot if we have a write in-flight.
-          // The cloud data may be stale (before our write completed).
+          // If we have an active write in flight, ignore snapshot to avoid state flickering
           if (writeInFlightRef.current) {
-            console.log("[NeoFlow] Skipping snapshot — write in-flight");
             return;
           }
 
-          if (!cloudData) return; // New user — keep local state
+          if (cloudData) {
+            const parsed = parseStore(cloudData);
+            if (parsed) {
+              setStore(parsed);
+              saveToLocalStorage(userKey, parsed);
+            }
+          }
 
-          const parsed = parseStore(cloudData);
-          if (!parsed) return;
-
-          // Apply cloud data (only when we have no pending local writes)
-          setStore(parsed);
-          saveToLocalStorage(userKey, parsed);
+          // Mark cloud sync as loaded so future local edits can save to cloud
+          isCloudLoadedRef.current = true;
         });
+
+        // Fallback: If snapshot callback takes too long or user is offline, unlock auto-save after 3 seconds
+        setTimeout(() => {
+          if (mountedRef.current && activeUserRef.current === user.uid) {
+            isCloudLoadedRef.current = true;
+          }
+        }, 3000);
+
       } else {
         // Guest mode
         activeUserRef.current = "guest";
         setCurrentUserId(null);
+        isCloudLoadedRef.current = true;
         const guestData = loadFromLocalStorage(`${STORAGE_KEY}-guest`) || emptyStore;
         setStore(guestData);
       }
@@ -185,9 +200,9 @@ export function NeoFlowProvider({ children }: { children: ReactNode }) {
       authUnsub();
       if (snapshotUnsub) snapshotUnsub();
     };
-  }, [doCloudSave]);
+  }, []);
 
-  // Auto-save: localStorage immediately, Firestore debounced at 600ms
+  // Auto-save: localStorage immediately, Firestore debounced (only after cloud initial load)
   useEffect(() => {
     const userId = activeUserRef.current;
     if (!userId) return;
@@ -197,14 +212,14 @@ export function NeoFlowProvider({ children }: { children: ReactNode }) {
     // Always persist locally immediately
     saveToLocalStorage(storageKey, store);
 
-    // Debounced cloud sync (skip for guests)
-    if (userId !== "guest") {
+    // Sync to Firestore ONLY after cloud has loaded and for logged in users
+    if (userId !== "guest" && isCloudLoadedRef.current) {
       if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current);
       saveDebounceRef.current = setTimeout(() => {
         if (mountedRef.current && activeUserRef.current === userId) {
           doCloudSave(userId, store);
         }
-      }, 600);
+      }, 500);
     }
   }, [store, doCloudSave]);
 
