@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "cpp:build": "g++ -O3 -std=c++17 -Icpp/include cpp/src/analytics_engine.cpp cpp/src/main.cpp -o cpp/bin/analytics_engine",
+    "cpp:build": "g++ -O3 -std=c++17 -Icpp/include cpp/src/analytics_engine.cpp cpp/src/ai_copilot_engine.cpp cpp/src/main.cpp -o cpp/bin/analytics_engine",
     "cpp:benchmark": "npm run cpp:build && ./cpp/bin/analytics_engine"
   },
   "dependencies": {
