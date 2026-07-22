@@ -49,7 +49,12 @@ function generateId(): string {
 
 function parseStore(raw: unknown): NeoFlowStore | null {
   if (!raw || typeof raw !== "object") return null;
-  const parsed = raw as Record<string, unknown>;
+  let parsed = raw as Record<string, unknown>;
+
+  // Unwrap doc.data() container if nested from Firestore saveUserData
+  if (parsed.data && typeof parsed.data === "object") {
+    parsed = parsed.data as Record<string, unknown>;
+  }
 
   // Decrypt encrypted vault payload if stored in Firestore or LocalStorage
   if (typeof parsed.encryptedPayload === "string") {
@@ -108,6 +113,7 @@ function getBestLocalStorageData(uid?: string | null): NeoFlowStore {
 export function NeoFlowProvider({ children }: { children: ReactNode }) {
   const [store, setStore] = useState<NeoFlowStore>(emptyStore);
   const [isHydrated, setIsHydrated] = useState(false);
+  const [isAuthInitialized, setIsAuthInitialized] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   
   // Track active user ID ref to avoid race conditions during auth transitions
@@ -122,7 +128,10 @@ export function NeoFlowProvider({ children }: { children: ReactNode }) {
 
   // 2. Auth & Real-Time Sync Listener: Subscribes to Firestore for instant Phone & PC sync with strict UID isolation
   useEffect(() => {
-    if (!auth) return;
+    if (!auth) {
+      setIsAuthInitialized(true);
+      return;
+    }
 
     let snapshotUnsub: (() => void) | null = null;
 
@@ -140,11 +149,8 @@ export function NeoFlowProvider({ children }: { children: ReactNode }) {
         const userSpecificKey = `${STORAGE_KEY}-${user.uid}`;
         const localUserCache = loadLocalStorageKey(userSpecificKey);
         
-        if (localUserCache) {
+        if (localUserCache && (localUserCache.plans.length > 0 || localUserCache.tasks.length > 0 || localUserCache.financialGoals.length > 0 || localUserCache.savedAmount > 0)) {
           setStore(localUserCache);
-        } else {
-          // Reset store for new user account to avoid leaking previous account/guest data
-          setStore(emptyStore);
         }
 
         // Subscribe to real-time Firestore cloud changes for THIS user
@@ -157,6 +163,7 @@ export function NeoFlowProvider({ children }: { children: ReactNode }) {
               localStorage.setItem(userSpecificKey, encrypted);
             }
           }
+          setIsAuthInitialized(true);
         });
       } else {
         // User logged out: switch to guest session isolated under guest key
@@ -164,6 +171,7 @@ export function NeoFlowProvider({ children }: { children: ReactNode }) {
         setCurrentUserId("guest-user");
         const guestData = loadLocalStorageKey(`${STORAGE_KEY}-guest-user`) || emptyStore;
         setStore(guestData);
+        setIsAuthInitialized(true);
       }
     });
 
@@ -173,9 +181,9 @@ export function NeoFlowProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // 3. Auto-save to LocalStorage and Firestore whenever store updates (strictly user-isolated)
+  // 3. Auto-save to LocalStorage and Firestore whenever store updates (strictly user-isolated & blocked until Auth is ready)
   useEffect(() => {
-    if (!isHydrated) return;
+    if (!isHydrated || !isAuthInitialized) return;
 
     const targetId = activeUserRef.current || currentUserId || "guest-user";
     const encryptedString = encryptVaultData(store);
@@ -189,7 +197,7 @@ export function NeoFlowProvider({ children }: { children: ReactNode }) {
     if (targetId && targetId !== "guest-user") {
       saveUserData(targetId, { encryptedPayload: encryptedString, ...store });
     }
-  }, [store, isHydrated, currentUserId]);
+  }, [store, isHydrated, isAuthInitialized, currentUserId]);
 
   // Plans
   const addPlan = useCallback((plan: Omit<Plan, "id" | "createdAt">) => {
