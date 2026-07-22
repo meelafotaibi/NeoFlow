@@ -12,6 +12,7 @@ import {
   doc,
   setDoc,
   getDoc,
+  onSnapshot,
 } from "firebase/firestore";
 
 // Read exclusively from environment variables for zero secret exposure in source code
@@ -97,6 +98,30 @@ export async function loadUserData(uid: string): Promise<object | null> {
     console.warn("Firestore load failed:", e);
   }
   return null;
+}
+
+// Subscribe to real-time Cloud Firestore updates for real-time Phone & PC synchronization
+export function subscribeToUserData(uid: string, callback: (data: object | null) => void) {
+  if (!db) return () => {};
+  try {
+    const userDocRef = doc(db, "users", uid);
+    return onSnapshot(
+      userDocRef,
+      (docSnap) => {
+        if (docSnap.exists()) {
+          callback(docSnap.data()?.data || null);
+        } else {
+          callback(null);
+        }
+      },
+      (error) => {
+        console.warn("Real-time sync listener error:", error);
+      }
+    );
+  } catch (e) {
+    console.warn("Failed to attach Firestore snapshot listener:", e);
+    return () => {};
+  }
 }
 
 export type { User };

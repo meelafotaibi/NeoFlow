@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, useCallback, useRef, type ReactNode } from "react";
 import type { Plan, Task, FinancialGoal, NeoFlowStore, TransactionRecord } from "./types";
-import { auth, saveUserData, loadUserData } from "./firebase";
+import { auth, saveUserData, loadUserData, subscribeToUserData } from "./firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import { encryptVaultData, decryptVaultData } from "./crypto-vault";
 
@@ -50,6 +50,12 @@ function generateId(): string {
 function parseStore(raw: unknown): NeoFlowStore | null {
   if (!raw || typeof raw !== "object") return null;
   const parsed = raw as Record<string, unknown>;
+
+  // Decrypt encrypted vault payload if stored in Firestore or LocalStorage
+  if (typeof parsed.encryptedPayload === "string") {
+    const decrypted = decryptVaultData(parsed.encryptedPayload);
+    if (decrypted) return parseStore(decrypted);
+  }
 
   const plans = Array.isArray(parsed.plans) ? parsed.plans : [];
   const tasks = Array.isArray(parsed.tasks) ? parsed.tasks : [];
@@ -114,39 +120,46 @@ export function NeoFlowProvider({ children }: { children: ReactNode }) {
     setIsHydrated(true);
   }, []);
 
-  // 2. Auth Listener: Load cloud Firestore data on login, isolate user session
+  // 2. Auth & Real-Time Sync Listener: Subscribes to Firestore for instant Phone & PC sync
   useEffect(() => {
     if (!auth) return;
 
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    let snapshotUnsub: (() => void) | null = null;
+
+    const authUnsub = onAuthStateChanged(auth, (user) => {
+      if (snapshotUnsub) {
+        snapshotUnsub();
+        snapshotUnsub = null;
+      }
+
       if (user) {
         activeUserRef.current = user.uid;
         setCurrentUserId(user.uid);
 
-        // Try local user cache first for instant UI response
+        // Try local user cache first for instant UI loading
         const localUserCache = loadLocalStorageKey(`${STORAGE_KEY}-${user.uid}`);
         if (localUserCache && (localUserCache.plans.length > 0 || localUserCache.financialGoals.length > 0 || localUserCache.savedAmount > 0)) {
           setStore(localUserCache);
         }
 
-        // Fetch cloud data from Firestore
-        const cloudData = await loadUserData(user.uid);
-        const parsedCloud = parseStore(cloudData);
-
-        if (parsedCloud && (parsedCloud.plans.length > 0 || parsedCloud.tasks.length > 0 || parsedCloud.financialGoals.length > 0 || parsedCloud.savedAmount > 0)) {
-          setStore(parsedCloud);
-          // Cache cloud data locally under user key
-          if (typeof window !== "undefined") {
-            localStorage.setItem(`${STORAGE_KEY}-${user.uid}`, JSON.stringify(parsedCloud));
+        // Subscribe to real-time Firestore cloud changes (Phone <-> PC sync)
+        snapshotUnsub = subscribeToUserData(user.uid, (cloudData) => {
+          const parsedCloud = parseStore(cloudData);
+          if (parsedCloud && (parsedCloud.plans.length > 0 || parsedCloud.tasks.length > 0 || parsedCloud.financialGoals.length > 0 || parsedCloud.savedAmount > 0)) {
+            setStore(parsedCloud);
+            if (typeof window !== "undefined") {
+              const encrypted = encryptVaultData(parsedCloud);
+              localStorage.setItem(`${STORAGE_KEY}-${user.uid}`, encrypted);
+            }
+          } else {
+            // Push initial local data to cloud if cloud document is new
+            const localFallback = localUserCache || getBestLocalStorageData(user.uid);
+            if (localFallback.plans.length > 0 || localFallback.financialGoals.length > 0 || localFallback.savedAmount > 0) {
+              setStore(localFallback);
+              saveUserData(user.uid, { encryptedPayload: encryptVaultData(localFallback), ...localFallback });
+            }
           }
-        } else {
-          // If Firestore is empty, push current local data to cloud so user data isn't lost
-          const localFallback = localUserCache || getBestLocalStorageData(user.uid);
-          if (localFallback.plans.length > 0 || localFallback.financialGoals.length > 0 || localFallback.savedAmount > 0) {
-            setStore(localFallback);
-            saveUserData(user.uid, localFallback);
-          }
-        }
+        });
       } else {
         // User logged out: switch to guest session without wiping user account key
         activeUserRef.current = "guest-user";
@@ -156,7 +169,10 @@ export function NeoFlowProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      authUnsub();
+      if (snapshotUnsub) snapshotUnsub();
+    };
   }, []);
 
   // 3. Auto-save to LocalStorage and Firestore whenever store updates (with client-side encryption)
