@@ -4,7 +4,7 @@ BUILD_DIR ?= bin
 
 all: $(BUILD_DIR)/analytics_engine
 
-$(BUILD_DIR)/analytics_engine: src/analytics_engine.cpp src/main.cpp | $(BUILD_DIR)
+$(BUILD_DIR)/analytics_engine: src/analytics_engine.cpp src/ai_copilot_engine.cpp src/main.cpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 $(BUILD_DIR):

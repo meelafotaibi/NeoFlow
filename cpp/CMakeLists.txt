@@ -8,6 +8,7 @@ include_directories(include)
 
 add_library(analytics_engine_lib STATIC
     src/analytics_engine.cpp
+    src/ai_copilot_engine.cpp
 )
 
 add_executable(analytics_engine

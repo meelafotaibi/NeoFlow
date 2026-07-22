@@ -62,9 +62,11 @@ export function Sidebar({ activeItem, onNavigate }: SidebarProps) {
           {/* Logo */}
           <div className="flex items-center gap-3 p-6 border-b border-border/30">
             <div className="relative">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center glow-blue">
-                <span className="text-lg font-bold text-primary-foreground">N</span>
-              </div>
+              <img
+                src="/icon.png"
+                alt="NeoFlow Logo"
+                className="w-10 h-10 rounded-xl object-cover border border-primary/30 shadow-md glow-blue"
+              />
             </div>
             <div>
               <h1 className="text-xl font-bold gradient-text">NeoFlow</h1>
@@ -101,14 +103,14 @@ export function Sidebar({ activeItem, onNavigate }: SidebarProps) {
 
           {/* Footer */}
           <div className="p-4 border-t border-border/30">
-            <div className="glass rounded-lg p-3">
-              <p className="text-xs text-muted-foreground mb-1">System Status</p>
+            <div className="glass rounded-lg p-2.5">
+              <p className="text-[11px] text-muted-foreground mb-1">System Status</p>
               <div className="flex items-center gap-2">
                 <span className="relative flex h-2 w-2">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-accent"></span>
                 </span>
-                <span className="text-xs text-foreground">All systems online</span>
+                <span className="text-xs text-foreground font-mono">All systems online</span>
               </div>
             </div>
           </div>

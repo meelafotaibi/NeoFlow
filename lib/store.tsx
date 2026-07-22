@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, useCallback, useRef, type ReactNode } from "react";
 import type { Plan, Task, FinancialGoal, NeoFlowStore, TransactionRecord } from "./types";
 import { auth, saveUserData, loadUserData } from "./firebase";
 import { onAuthStateChanged } from "firebase/auth";
@@ -57,7 +57,19 @@ function parseStore(raw: unknown): NeoFlowStore | null {
   return { plans, tasks, financialGoals, savedAmount, transactions };
 }
 
-// Helper to read stored data across all fallback keys
+// Safely load local storage for a specific key
+function loadLocalStorageKey(key: string): NeoFlowStore | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) {
+      return parseStore(JSON.parse(raw));
+    }
+  } catch {}
+  return null;
+}
+
+// Fallback search across local keys if specific key is empty
 function getBestLocalStorageData(uid?: string | null): NeoFlowStore {
   if (typeof window === "undefined") return emptyStore;
 
@@ -65,30 +77,20 @@ function getBestLocalStorageData(uid?: string | null): NeoFlowStore {
   if (uid) {
     keysToTry.push(`${STORAGE_KEY}-${uid}`);
   }
-  keysToTry.push(`${STORAGE_KEY}-guest-user`);
   keysToTry.push(STORAGE_KEY);
+  keysToTry.push(`${STORAGE_KEY}-guest-user`);
   keysToTry.push(`${STORAGE_KEY}-backup`);
 
   for (const key of keysToTry) {
-    try {
-      const raw = localStorage.getItem(key);
-      if (raw) {
-        const parsed = parseStore(JSON.parse(raw));
-        if (parsed && (parsed.plans.length > 0 || parsed.tasks.length > 0 || parsed.financialGoals.length > 0 || parsed.savedAmount > 0)) {
-          return parsed;
-        }
-      }
-    } catch {}
+    const data = loadLocalStorageKey(key);
+    if (data && (data.plans.length > 0 || data.tasks.length > 0 || data.financialGoals.length > 0 || data.savedAmount > 0)) {
+      return data;
+    }
   }
 
-  // If any parsed store exists even if empty, return it
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = parseStore(JSON.parse(raw));
-      if (parsed) return parsed;
-    }
-  } catch {}
+  // If any valid store exists return it
+  const defaultData = loadLocalStorageKey(STORAGE_KEY);
+  if (defaultData) return defaultData;
 
   return emptyStore;
 }
@@ -97,61 +99,76 @@ export function NeoFlowProvider({ children }: { children: ReactNode }) {
   const [store, setStore] = useState<NeoFlowStore>(emptyStore);
   const [isHydrated, setIsHydrated] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  
+  // Track active user ID ref to avoid race conditions during auth transitions
+  const activeUserRef = useRef<string | null>(null);
 
-  // 1. Synchronous initial hydration from localStorage on mount (prevents blank wipe on reload)
+  // 1. Initial hydration from local storage on mount
   useEffect(() => {
-    const localData = getBestLocalStorageData(null);
-    setStore(localData);
+    const initialData = getBestLocalStorageData(null);
+    setStore(initialData);
     setIsHydrated(true);
   }, []);
 
-  // 2. Listen to auth state — merge cloud & local user data
+  // 2. Auth Listener: Load cloud Firestore data on login, isolate user session
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
+        activeUserRef.current = user.uid;
         setCurrentUserId(user.uid);
-        // Try Firestore cloud data first
+
+        // Try local user cache first for instant UI response
+        const localUserCache = loadLocalStorageKey(`${STORAGE_KEY}-${user.uid}`);
+        if (localUserCache && (localUserCache.plans.length > 0 || localUserCache.financialGoals.length > 0 || localUserCache.savedAmount > 0)) {
+          setStore(localUserCache);
+        }
+
+        // Fetch cloud data from Firestore
         const cloudData = await loadUserData(user.uid);
         const parsedCloud = parseStore(cloudData);
 
         if (parsedCloud && (parsedCloud.plans.length > 0 || parsedCloud.tasks.length > 0 || parsedCloud.financialGoals.length > 0 || parsedCloud.savedAmount > 0)) {
           setStore(parsedCloud);
+          // Cache cloud data locally under user key
+          if (typeof window !== "undefined") {
+            localStorage.setItem(`${STORAGE_KEY}-${user.uid}`, JSON.stringify(parsedCloud));
+          }
         } else {
-          // If cloud is empty, fallback to local storage
-          const localUserData = getBestLocalStorageData(user.uid);
-          setStore(localUserData);
+          // If Firestore is empty, push current local data to cloud so user data isn't lost
+          const localFallback = localUserCache || getBestLocalStorageData(user.uid);
+          if (localFallback.plans.length > 0 || localFallback.financialGoals.length > 0 || localFallback.savedAmount > 0) {
+            setStore(localFallback);
+            saveUserData(user.uid, localFallback);
+          }
         }
       } else {
-        const isGuestSession = typeof window !== "undefined" && localStorage.getItem("neoflow-guest-session") === "true";
-        if (isGuestSession) {
-          setCurrentUserId("guest-user");
-          const localData = getBestLocalStorageData("guest-user");
-          setStore(localData);
-        } else {
-          setCurrentUserId("guest-user");
-          const localData = getBestLocalStorageData(null);
-          setStore(localData);
-        }
+        // User logged out: switch to guest session without wiping user account key
+        activeUserRef.current = "guest-user";
+        setCurrentUserId("guest-user");
+        const guestData = getBestLocalStorageData("guest-user");
+        setStore(guestData);
       }
     });
+
     return () => unsubscribe();
   }, []);
 
-  // 3. Persist to localStorage + Firestore on any state changes
+  // 3. Auto-save to LocalStorage and Firestore whenever store updates
   useEffect(() => {
     if (!isHydrated) return;
 
-    const targetId = currentUserId || "guest-user";
+    const targetId = activeUserRef.current || currentUserId || "guest-user";
     const payload = JSON.stringify(store);
 
-    // Save to primary user key, global fallback key, and backup key
-    localStorage.setItem(`${STORAGE_KEY}-${targetId}`, payload);
-    localStorage.setItem(STORAGE_KEY, payload);
-    localStorage.setItem(`${STORAGE_KEY}-backup`, payload);
+    // Save to user-specific local key
+    if (typeof window !== "undefined") {
+      localStorage.setItem(`${STORAGE_KEY}-${targetId}`, payload);
+      localStorage.setItem(STORAGE_KEY, payload);
+    }
 
-    // Save to cloud Firestore if logged in
-    if (currentUserId && currentUserId !== "guest-user") {
-      saveUserData(currentUserId, store);
+    // Sync to Firestore cloud if logged in
+    if (targetId && targetId !== "guest-user") {
+      saveUserData(targetId, store);
     }
   }, [store, isHydrated, currentUserId]);
 

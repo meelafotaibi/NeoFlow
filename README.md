@@ -1,14 +1,22 @@
 # NeoFlow Personal Productivity & Financial Dashboard
 
-NeoFlow is a high-performance, open-source personal dashboard designed for tracking active plans, task priority queues, financial goals, savings forecasts, and daily productivity habits.
+NeoFlow is a high-performance, open-source personal life operating system designed for tracking active plans, task priority queues, financial goals, savings forecasts, and daily productivity habits.
 
 Built with Next.js 16, React 19, Tailwind CSS, Firebase, and a native C++ calculation engine for sub-millisecond data processing.
 
 ---
 
+## Live Deployment & Repository
+
+- **Live Application**: [https://neoflow-4df47.web.app](https://neoflow-4df47.web.app) (Firebase Hosting)
+- **Alternative Domain**: [https://neoflow-4df47.firebaseapp.com](https://neoflow-4df47.firebaseapp.com)
+- **GitHub Repository**: [https://github.com/meelafotaibi/NeoFlow](https://github.com/meelafotaibi/NeoFlow)
+
+---
+
 ## Features
 
-- **Personalized Executive Dashboard**: Real-time Overview of active goals, daily check-ins, tasks due, and wallet metrics.
+- **Personalized Executive Dashboard**: Real-time overview of active goals, daily check-ins, tasks due, and wallet metrics.
 - **Sub-Millisecond C++ Analytics Engine**: Native C++ algorithms compiled for high-speed financial goal forecasting, compound interest projections, and task queue scheduling.
 - **Savings Simulator & Forecast**: Dynamic projection charts linked to real wallet balances and daily contribution rates.
 - **Smart Focus Co-Pilot**: AI-powered strategy engine generating structured plans and task conversions based on your schedule.
@@ -101,7 +109,7 @@ SUCCESS: All C++ engine benchmark tests executed in < 1 ms.
 1. **Clone the repository**:
    ```bash
    git clone https://github.com/meelafotaibi/NeoFlow.git
-   cd neo-flow-dashboard
+   cd NeoFlow
    ```
 
 2. **Configure Environment Variables**:
